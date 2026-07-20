@@ -16,12 +16,29 @@ import RegisterPage from './src/pages/Register';
 
 // App screens
 import DashboardPage from './src/pages/Dashboard';
+import DemandsPage from './src/pages/Demands';
+import DemandDetailPage from './src/pages/DemandDetail';
+import CreateDemandPage from './src/pages/CreateDemand';
+import MyBidsPage from './src/pages/MyBids';
+import ProfilePage from './src/pages/Profile';
+import NotificationsPage from './src/pages/Notifications';
+import MessagesPage from './src/pages/Messages';
+import MessageThreadPage from './src/pages/MessageThread';
+import OrdersPage from './src/pages/Orders';
+import SettingsPage from './src/pages/Settings';
+import UsersPage from './src/pages/Users';
+import WatchlistPage from './src/pages/Watchlist';
+import AllianceHubPage from './src/pages/AllianceHub';
+import AllianceCreatePage from './src/pages/AllianceCreate';
+import AllianceDashboardPage from './src/pages/AllianceDashboard';
+import AllianceChatPage from './src/pages/AllianceChat';
+import AllianceSettingsPage from './src/pages/AllianceSettings';
 
 export type RootStackParamList = {
   // Auth
   Login: undefined;
   Register: undefined;
-  // App
+  // Core
   Dashboard: undefined;
   Demands: { filter?: 'buy' | 'sell' } | undefined;
   DemandDetail: { demandId: string };
@@ -29,6 +46,19 @@ export type RootStackParamList = {
   MyBids: undefined;
   Profile: { userId?: string } | undefined;
   Notifications: undefined;
+  // New pages
+  Messages: undefined;
+  MessageThread: { threadId: string; otherUserName: string };
+  Orders: undefined;
+  Settings: undefined;
+  Users: undefined;
+  Watchlist: undefined;
+  // Alliance
+  AllianceHub: undefined;
+  AllianceCreate: undefined;
+  AllianceDashboard: { allianceId: string };
+  AllianceChat: { allianceId: string; allianceName: string };
+  AllianceSettings: { allianceId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -43,6 +73,23 @@ function AppNavigator({ session }: { session: Session | null }) {
       {session ? (
         <>
           <Stack.Screen name="Dashboard" component={DashboardPage} />
+          <Stack.Screen name="Demands" component={DemandsPage} />
+          <Stack.Screen name="DemandDetail" component={DemandDetailPage} />
+          <Stack.Screen name="CreateDemand" component={CreateDemandPage} />
+          <Stack.Screen name="MyBids" component={MyBidsPage} />
+          <Stack.Screen name="Profile" component={ProfilePage} />
+          <Stack.Screen name="Notifications" component={NotificationsPage} />
+          <Stack.Screen name="Messages" component={MessagesPage} />
+          <Stack.Screen name="MessageThread" component={MessageThreadPage} />
+          <Stack.Screen name="Orders" component={OrdersPage} />
+          <Stack.Screen name="Settings" component={SettingsPage} />
+          <Stack.Screen name="Users" component={UsersPage} />
+          <Stack.Screen name="Watchlist" component={WatchlistPage} />
+          <Stack.Screen name="AllianceHub" component={AllianceHubPage} />
+          <Stack.Screen name="AllianceCreate" component={AllianceCreatePage} />
+          <Stack.Screen name="AllianceDashboard" component={AllianceDashboardPage} />
+          <Stack.Screen name="AllianceChat" component={AllianceChatPage} />
+          <Stack.Screen name="AllianceSettings" component={AllianceSettingsPage} />
         </>
       ) : (
         <>
