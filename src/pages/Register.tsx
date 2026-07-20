@@ -5,8 +5,7 @@
  *   Step 2: Company (display name, company name, region, bio)
  *   Step 3: Preferences (notification toggles + terms acceptance)
  *
- * Validation mirrors the web Zod schema (all rules enforced client-side).
- * Draft is persisted to AsyncStorage and restored on mount.
+ * Now uses authService.register() which handles the RLS session fix.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -14,7 +13,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -25,11 +23,8 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { supabase } from '../supabase/client';
+import { authService } from '../services/auth.service';
 
-// ---------------------------------------------------------------------------
-// Navigation types (adjust RootStackParamList to your navigator)
-// ---------------------------------------------------------------------------
 type RootStackParamList = {
   Login: undefined;
   Register: undefined;
@@ -37,9 +32,6 @@ type RootStackParamList = {
 };
 type Props = NativeStackScreenProps<RootStackParamList, 'Register'>;
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 const REGIONS = [
   { code: 'US', name: 'United States', flag: '🇺🇸' },
   { code: 'EU', name: 'Europe', flag: '🇪🇺' },
@@ -59,9 +51,6 @@ const STEPS = [
   { id: 3, title: 'Preferences', desc: 'Customize your experience' },
 ];
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 interface FormData {
   email: string;
   password: string;
@@ -79,24 +68,12 @@ interface FormData {
 }
 
 const DEFAULT: FormData = {
-  email: '',
-  password: '',
-  confirmPassword: '',
-  displayName: '',
-  companyName: '',
-  region: '',
-  bio: '',
-  acceptTerms: false,
-  acceptMarketing: false,
-  emailNotifications: true,
-  newDemands: true,
-  priceChanges: true,
-  messages: true,
+  email: '', password: '', confirmPassword: '',
+  displayName: '', companyName: '', region: '', bio: '',
+  acceptTerms: false, acceptMarketing: false,
+  emailNotifications: true, newDemands: true, priceChanges: true, messages: true,
 };
 
-// ---------------------------------------------------------------------------
-// Password strength (mirrors web heuristic)
-// ---------------------------------------------------------------------------
 function passwordStrength(pw: string): number {
   if (!pw) return 0;
   let s = 0;
@@ -115,9 +92,6 @@ function strengthLabel(s: number) {
   return { text: 'Strong', color: '#22c55e' };
 }
 
-// ---------------------------------------------------------------------------
-// Validate fields for each step
-// ---------------------------------------------------------------------------
 function validateStep(step: number, d: FormData): Record<string, string> {
   const errs: Record<string, string> = {};
   if (step === 1) {
@@ -138,9 +112,6 @@ function validateStep(step: number, d: FormData): Record<string, string> {
   return errs;
 }
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 export default function Register({ navigation }: Props) {
   const [form, setForm] = useState<FormData>(DEFAULT);
   const [step, setStep] = useState(1);
@@ -158,12 +129,10 @@ export default function Register({ navigation }: Props) {
     []
   );
 
-  // Persist draft
   useEffect(() => {
     AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(form)).catch(() => {});
   }, [form]);
 
-  // Restore draft on mount
   useEffect(() => {
     AsyncStorage.getItem(DRAFT_KEY)
       .then((raw) => {
@@ -178,9 +147,6 @@ export default function Register({ navigation }: Props) {
   const strengthInfo = strengthLabel(strength);
   const progress = Math.round((step / STEPS.length) * 100);
 
-  // -------------------------------------------------------------------------
-  // Navigation between steps
-  // -------------------------------------------------------------------------
   const goNext = () => {
     const errs = validateStep(step, form);
     if (Object.keys(errs).length > 0) {
@@ -199,9 +165,6 @@ export default function Register({ navigation }: Props) {
     scrollRef.current?.scrollTo({ y: 0, animated: true });
   };
 
-  // -------------------------------------------------------------------------
-  // Submit
-  // -------------------------------------------------------------------------
   const onSubmit = async () => {
     const errs = validateStep(3, form);
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
@@ -209,55 +172,31 @@ export default function Register({ navigation }: Props) {
     setLoading(true);
     setGlobalError('');
     try {
-      const { data, error } = await supabase.auth.signUp({
+      await authService.register({
         email: form.email.trim(),
         password: form.password,
-        options: {
-          data: {
-            display_name: form.displayName.trim(),
-            company_name: form.companyName.trim(),
-            region: form.region,
-            bio: form.bio.trim(),
-            preferences: {
-              notificationSettings: {
-                emailNotifications: form.emailNotifications,
-                newDemands: form.newDemands,
-                priceChanges: form.priceChanges,
-                messages: form.messages,
-              },
-              acceptMarketing: form.acceptMarketing,
-            },
+        displayName: form.displayName.trim(),
+        companyName: form.companyName.trim(),
+        region: form.region,
+        bio: form.bio.trim(),
+        preferences: {
+          notificationSettings: {
+            emailNotifications: form.emailNotifications,
+            pushNotifications: true,
+            newDemands: form.newDemands,
+            priceChanges: form.priceChanges,
+            messages: form.messages,
           },
         },
       });
 
-      if (error) throw error;
-
-      // Also upsert UserProfile row
-      if (data.user) {
-        await supabase.from('UserProfile').upsert({
-          id: data.user.id,
-          display_name: form.displayName.trim(),
-          company_name: form.companyName.trim(),
-          region: form.region,
-          bio: form.bio.trim(),
-          email: form.email.trim(),
-        });
-      }
-
       await AsyncStorage.removeItem(DRAFT_KEY);
 
-      if (data.session) {
-        // Auto-confirmed — go straight to dashboard
-        navigation.replace('Dashboard');
-      } else {
-        // Email confirmation required
-        Alert.alert(
-          'Check your email',
-          'We sent a confirmation link to ' + form.email + '. Verify your email then sign in.',
-          [{ text: 'Go to Login', onPress: () => navigation.replace('Login') }]
-        );
-      }
+      Alert.alert(
+        'Account created! 🎉',
+        'Please check your email for a confirmation link, then sign in.',
+        [{ text: 'Sign In', onPress: () => navigation.replace('Login') }]
+      );
     } catch (err: any) {
       setGlobalError(err?.message ?? 'Registration failed. Please try again.');
       scrollRef.current?.scrollTo({ y: 0, animated: true });
@@ -266,25 +205,13 @@ export default function Register({ navigation }: Props) {
     }
   };
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        ref={scrollRef}
-        style={styles.scroll}
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Header */}
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Create your account</Text>
         <Text style={styles.subtitle}>Join the SimCompanies marketplace community</Text>
 
-        {/* Progress bar */}
+        {/* Progress */}
         <View style={styles.progressRow}>
           <Text style={styles.progressText}>Step {step} of {STEPS.length}</Text>
           <Text style={styles.progressText}>{progress}% complete</Text>
@@ -293,221 +220,103 @@ export default function Register({ navigation }: Props) {
           <View style={[styles.progressFill, { width: `${progress}%` as any }]} />
         </View>
 
-        {/* Step indicators */}
+        {/* Step chips */}
         <View style={styles.stepRow}>
           {STEPS.map((s) => {
             const isActive = step === s.id;
             const isDone = step > s.id;
             return (
-              <View
-                key={s.id}
-                style={[
-                  styles.stepChip,
-                  isActive && styles.stepChipActive,
-                  isDone && styles.stepChipDone,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.stepDot,
-                    isActive && styles.stepDotActive,
-                    isDone && styles.stepDotDone,
-                  ]}
-                >
-                  <Text style={styles.stepDotText}>
-                    {isDone ? '✓' : s.id}
-                  </Text>
+              <View key={s.id} style={[styles.stepChip, isActive && styles.stepChipActive, isDone && styles.stepChipDone]}>
+                <View style={[styles.stepDot, isActive && styles.stepDotActive, isDone && styles.stepDotDone]}>
+                  <Text style={styles.stepDotText}>{isDone ? '✓' : s.id}</Text>
                 </View>
-                <Text
-                  style={[
-                    styles.stepLabel,
-                    isActive && styles.stepLabelActive,
-                    isDone && styles.stepLabelDone,
-                  ]}
-                >
-                  {s.title}
-                </Text>
+                <Text style={[styles.stepLabel, isActive && styles.stepLabelActive, isDone && styles.stepLabelDone]}>{s.title}</Text>
               </View>
             );
           })}
         </View>
 
-        {/* Global error */}
         {!!globalError && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorBoxText}>⚠ {globalError}</Text>
-          </View>
+          <View style={styles.errorBox}><Text style={styles.errorBoxText}>⚠ {globalError}</Text></View>
         )}
 
-        {/* ---------------------------------------------------------------- */}
-        {/* STEP 1 — Account */}
-        {/* ---------------------------------------------------------------- */}
+        {/* STEP 1 */}
         {step === 1 && (
           <View style={styles.stepContent}>
-            {/* Email */}
             <View style={styles.field}>
               <Text style={styles.label}>Email address *</Text>
-              <TextInput
-                style={[styles.input, errors.email ? styles.inputError : null]}
-                placeholder="Enter your email"
-                placeholderTextColor="#9ca3af"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                textContentType="emailAddress"
-                value={form.email}
-                onChangeText={(v) => set('email', v)}
-              />
+              <TextInput style={[styles.input, errors.email ? styles.inputError : null]} placeholder="Enter your email" placeholderTextColor="#9ca3af" autoCapitalize="none" keyboardType="email-address" textContentType="emailAddress" value={form.email} onChangeText={(v) => set('email', v)} />
               {!!errors.email && <Text style={styles.fieldError}>{errors.email}</Text>}
             </View>
-
-            {/* Password */}
             <View style={styles.field}>
               <Text style={styles.label}>Password *</Text>
               <View style={styles.inputRow}>
-                <TextInput
-                  style={[styles.inputFlex, errors.password ? styles.inputError : null]}
-                  placeholder="Create a strong password"
-                  placeholderTextColor="#9ca3af"
-                  secureTextEntry={!showPw}
-                  textContentType="newPassword"
-                  value={form.password}
-                  onChangeText={(v) => set('password', v)}
-                />
-                <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPw((p) => !p)}>
-                  <Text style={styles.eyeText}>{showPw ? '🙈' : '👁'}</Text>
-                </TouchableOpacity>
+                <TextInput style={[styles.inputFlex, errors.password ? styles.inputError : null]} placeholder="Create a strong password" placeholderTextColor="#9ca3af" secureTextEntry={!showPw} textContentType="newPassword" value={form.password} onChangeText={(v) => set('password', v)} />
+                <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPw((p) => !p)}><Text style={styles.eyeText}>{showPw ? '🙈' : '👁'}</Text></TouchableOpacity>
               </View>
-              {/* Strength meter */}
               {!!form.password && (
                 <View style={styles.strengthWrap}>
-                  <View style={styles.strengthTrack}>
-                    <View
-                      style={[
-                        styles.strengthFill,
-                        { width: `${strength}%` as any, backgroundColor: strengthInfo.color },
-                      ]}
-                    />
-                  </View>
-                  <Text style={[styles.strengthText, { color: strengthInfo.color }]}>
-                    {strengthInfo.text}
-                  </Text>
+                  <View style={styles.strengthTrack}><View style={[styles.strengthFill, { width: `${strength}%` as any, backgroundColor: strengthInfo.color }]} /></View>
+                  <Text style={[styles.strengthText, { color: strengthInfo.color }]}>{strengthInfo.text}</Text>
                 </View>
               )}
               {!!errors.password && <Text style={styles.fieldError}>{errors.password}</Text>}
             </View>
-
-            {/* Confirm password */}
             <View style={styles.field}>
               <Text style={styles.label}>Confirm password *</Text>
               <View style={styles.inputRow}>
-                <TextInput
-                  style={[styles.inputFlex, errors.confirmPassword ? styles.inputError : null]}
-                  placeholder="Confirm your password"
-                  placeholderTextColor="#9ca3af"
-                  secureTextEntry={!showConfirm}
-                  textContentType="newPassword"
-                  value={form.confirmPassword}
-                  onChangeText={(v) => set('confirmPassword', v)}
-                />
-                <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowConfirm((p) => !p)}>
-                  <Text style={styles.eyeText}>{showConfirm ? '🙈' : '👁'}</Text>
-                </TouchableOpacity>
+                <TextInput style={[styles.inputFlex, errors.confirmPassword ? styles.inputError : null]} placeholder="Confirm your password" placeholderTextColor="#9ca3af" secureTextEntry={!showConfirm} textContentType="newPassword" value={form.confirmPassword} onChangeText={(v) => set('confirmPassword', v)} />
+                <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowConfirm((p) => !p)}><Text style={styles.eyeText}>{showConfirm ? '🙈' : '👁'}</Text></TouchableOpacity>
               </View>
               {!!errors.confirmPassword && <Text style={styles.fieldError}>{errors.confirmPassword}</Text>}
             </View>
           </View>
         )}
 
-        {/* ---------------------------------------------------------------- */}
-        {/* STEP 2 — Company */}
-        {/* ---------------------------------------------------------------- */}
+        {/* STEP 2 */}
         {step === 2 && (
           <View style={styles.stepContent}>
             <View style={styles.field}>
               <Text style={styles.label}>Your name *</Text>
-              <TextInput
-                style={[styles.input, errors.displayName ? styles.inputError : null]}
-                placeholder="John Doe"
-                placeholderTextColor="#9ca3af"
-                value={form.displayName}
-                onChangeText={(v) => set('displayName', v)}
-              />
+              <TextInput style={[styles.input, errors.displayName ? styles.inputError : null]} placeholder="John Doe" placeholderTextColor="#9ca3af" value={form.displayName} onChangeText={(v) => set('displayName', v)} />
               {!!errors.displayName && <Text style={styles.fieldError}>{errors.displayName}</Text>}
             </View>
-
             <View style={styles.field}>
               <Text style={styles.label}>Company name *</Text>
-              <TextInput
-                style={[styles.input, errors.companyName ? styles.inputError : null]}
-                placeholder="Acme Corp"
-                placeholderTextColor="#9ca3af"
-                value={form.companyName}
-                onChangeText={(v) => set('companyName', v)}
-              />
+              <TextInput style={[styles.input, errors.companyName ? styles.inputError : null]} placeholder="Acme Corp" placeholderTextColor="#9ca3af" value={form.companyName} onChangeText={(v) => set('companyName', v)} />
               {!!errors.companyName && <Text style={styles.fieldError}>{errors.companyName}</Text>}
             </View>
-
-            {/* Region picker */}
             <View style={styles.field}>
               <Text style={styles.label}>Region *</Text>
-              <TouchableOpacity
-                style={[styles.input, styles.pickerBtn, errors.region ? styles.inputError : null]}
-                onPress={() => setShowRegionPicker((p) => !p)}
-              >
+              <TouchableOpacity style={[styles.input, styles.pickerBtn, errors.region ? styles.inputError : null]} onPress={() => setShowRegionPicker((p) => !p)}>
                 <Text style={form.region ? styles.pickerValue : styles.pickerPlaceholder}>
-                  {form.region
-                    ? `${REGIONS.find((r) => r.code === form.region)?.flag ?? ''} ${REGIONS.find((r) => r.code === form.region)?.name ?? form.region}`
-                    : 'Select your region'}
+                  {form.region ? `${REGIONS.find((r) => r.code === form.region)?.flag ?? ''} ${REGIONS.find((r) => r.code === form.region)?.name ?? form.region}` : 'Select your region'}
                 </Text>
                 <Text style={styles.chevron}>{showRegionPicker ? '▲' : '▼'}</Text>
               </TouchableOpacity>
               {showRegionPicker && (
                 <View style={styles.dropdown}>
                   {REGIONS.map((r) => (
-                    <TouchableOpacity
-                      key={r.code}
-                      style={[
-                        styles.dropdownItem,
-                        form.region === r.code && styles.dropdownItemSelected,
-                      ]}
-                      onPress={() => {
-                        set('region', r.code);
-                        setShowRegionPicker(false);
-                      }}
-                    >
-                      <Text style={styles.dropdownItemText}>
-                        {r.flag}  {r.name}
-                      </Text>
+                    <TouchableOpacity key={r.code} style={[styles.dropdownItem, form.region === r.code && styles.dropdownItemSelected]} onPress={() => { set('region', r.code); setShowRegionPicker(false); }}>
+                      <Text style={styles.dropdownItemText}>{r.flag}  {r.name}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
               )}
               {!!errors.region && <Text style={styles.fieldError}>{errors.region}</Text>}
             </View>
-
             <View style={styles.field}>
               <Text style={styles.label}>Company bio (optional)</Text>
-              <TextInput
-                style={[styles.input, styles.textarea]}
-                placeholder="Tell us about your company..."
-                placeholderTextColor="#9ca3af"
-                multiline
-                maxLength={500}
-                value={form.bio}
-                onChangeText={(v) => set('bio', v)}
-              />
+              <TextInput style={[styles.input, styles.textarea]} placeholder="Tell us about your company..." placeholderTextColor="#9ca3af" multiline maxLength={500} value={form.bio} onChangeText={(v) => set('bio', v)} />
               <Text style={styles.charCount}>{form.bio.length}/500 characters</Text>
             </View>
           </View>
         )}
 
-        {/* ---------------------------------------------------------------- */}
-        {/* STEP 3 — Preferences */}
-        {/* ---------------------------------------------------------------- */}
+        {/* STEP 3 */}
         {step === 3 && (
           <View style={styles.stepContent}>
             <Text style={styles.sectionTitle}>Notification Preferences</Text>
-
             {([
               { key: 'emailNotifications', label: 'Email notifications' },
               { key: 'newDemands', label: 'New demands in your categories' },
@@ -516,81 +325,41 @@ export default function Register({ navigation }: Props) {
             ] as { key: keyof FormData; label: string }[]).map(({ key, label }) => (
               <View key={key} style={styles.switchRow}>
                 <Text style={styles.switchLabel}>{label}</Text>
-                <Switch
-                  value={!!form[key]}
-                  onValueChange={(v) => set(key, v)}
-                  trackColor={{ false: '#d1d5db', true: '#3b82f6' }}
-                  thumbColor="#fff"
-                />
+                <Switch value={!!form[key]} onValueChange={(v) => set(key, v)} trackColor={{ false: '#d1d5db', true: '#3b82f6' }} thumbColor="#fff" />
               </View>
             ))}
-
             <View style={styles.divider} />
             <Text style={styles.sectionTitle}>Terms &amp; Conditions</Text>
-
-            <TouchableOpacity
-              style={styles.checkRow}
-              onPress={() => set('acceptTerms', !form.acceptTerms)}
-              activeOpacity={0.7}
-            >
-              <View
-                style={[
-                  styles.checkbox,
-                  form.acceptTerms && styles.checkboxChecked,
-                  errors.acceptTerms ? styles.checkboxError : null,
-                ]}
-              >
+            <TouchableOpacity style={styles.checkRow} onPress={() => set('acceptTerms', !form.acceptTerms)} activeOpacity={0.7}>
+              <View style={[styles.checkbox, form.acceptTerms && styles.checkboxChecked, errors.acceptTerms ? styles.checkboxError : null]}>
                 {form.acceptTerms && <Text style={styles.checkmark}>✓</Text>}
               </View>
-              <Text style={styles.checkLabel}>
-                I agree to the{' '}
-                <Text style={styles.link}>Terms of Service</Text> and{' '}
-                <Text style={styles.link}>Privacy Policy</Text>
-              </Text>
+              <Text style={styles.checkLabel}>I agree to the <Text style={styles.link}>Terms of Service</Text> and <Text style={styles.link}>Privacy Policy</Text></Text>
             </TouchableOpacity>
             {!!errors.acceptTerms && <Text style={styles.fieldError}>{errors.acceptTerms}</Text>}
-
-            <TouchableOpacity
-              style={[styles.checkRow, { marginTop: 12 }]}
-              onPress={() => set('acceptMarketing', !form.acceptMarketing)}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity style={[styles.checkRow, { marginTop: 12 }]} onPress={() => set('acceptMarketing', !form.acceptMarketing)} activeOpacity={0.7}>
               <View style={[styles.checkbox, form.acceptMarketing && styles.checkboxChecked]}>
                 {form.acceptMarketing && <Text style={styles.checkmark}>✓</Text>}
               </View>
-              <Text style={styles.checkLabel}>
-                I'd like to receive marketing emails about new features and offers
-              </Text>
+              <Text style={styles.checkLabel}>I’d like to receive marketing emails about new features and offers</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Navigation buttons */}
+        {/* Nav */}
         <View style={styles.navRow}>
           {step > 1 ? (
-            <TouchableOpacity style={styles.btnOutline} onPress={goPrev}>
-              <Text style={styles.btnOutlineText}>← Previous</Text>
-            </TouchableOpacity>
-          ) : (
-            <View />
-          )}
-
+            <TouchableOpacity style={styles.btnOutline} onPress={goPrev}><Text style={styles.btnOutlineText}>← Previous</Text></TouchableOpacity>
+          ) : <View />}
           {step < STEPS.length ? (
-            <TouchableOpacity style={styles.btnPrimary} onPress={goNext}>
-              <Text style={styles.btnPrimaryText}>Next →</Text>
-            </TouchableOpacity>
+            <TouchableOpacity style={styles.btnPrimary} onPress={goNext}><Text style={styles.btnPrimaryText}>Next →</Text></TouchableOpacity>
           ) : (
-            <TouchableOpacity
-              style={[styles.btnPrimary, styles.btnSuccess, loading && styles.btnDisabled]}
-              onPress={onSubmit}
-              disabled={loading}
-            >
+            <TouchableOpacity style={[styles.btnPrimary, styles.btnSuccess, loading && styles.btnDisabled]} onPress={onSubmit} disabled={loading}>
               <Text style={styles.btnPrimaryText}>{loading ? 'Creating…' : 'Create account →'}</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>Already have an account? </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Login')}>
@@ -602,22 +371,16 @@ export default function Register({ navigation }: Props) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#f9fafb' },
   scroll: { flex: 1 },
   container: { padding: 24, paddingBottom: 48 },
-
   title: { fontSize: 26, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 4 },
   subtitle: { fontSize: 14, color: '#6b7280', textAlign: 'center', marginBottom: 20 },
-
   progressRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   progressText: { fontSize: 12, color: '#9ca3af' },
   progressTrack: { height: 6, backgroundColor: '#e5e7eb', borderRadius: 99, overflow: 'hidden', marginBottom: 16 },
   progressFill: { height: 6, backgroundColor: '#3b82f6', borderRadius: 99 },
-
   stepRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 24, flexWrap: 'wrap' },
   stepChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: '#f3f4f6' },
   stepChipActive: { backgroundColor: '#dbeafe' },
@@ -629,12 +392,9 @@ const styles = StyleSheet.create({
   stepLabel: { fontSize: 12, fontWeight: '600', color: '#9ca3af' },
   stepLabelActive: { color: '#2563eb' },
   stepLabelDone: { color: '#16a34a' },
-
   errorBox: { backgroundColor: '#fef2f2', borderColor: '#fecaca', borderWidth: 1, borderRadius: 8, padding: 12, marginBottom: 16 },
   errorBoxText: { color: '#b91c1c', fontSize: 14 },
-
   stepContent: { marginBottom: 8 },
-
   field: { marginBottom: 16 },
   label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
   input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#111827' },
@@ -643,14 +403,11 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   eyeBtn: { padding: 10 },
   eyeText: { fontSize: 18 },
-
   strengthWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
   strengthTrack: { flex: 1, height: 6, backgroundColor: '#e5e7eb', borderRadius: 99, overflow: 'hidden' },
   strengthFill: { height: 6, borderRadius: 99 },
   strengthText: { fontSize: 12, fontWeight: '600', minWidth: 44, textAlign: 'right' },
-
   fieldError: { fontSize: 12, color: '#ef4444', marginTop: 4 },
-
   pickerBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   pickerValue: { fontSize: 15, color: '#111827' },
   pickerPlaceholder: { fontSize: 15, color: '#9ca3af' },
@@ -659,15 +416,12 @@ const styles = StyleSheet.create({
   dropdownItem: { paddingHorizontal: 14, paddingVertical: 12 },
   dropdownItemSelected: { backgroundColor: '#eff6ff' },
   dropdownItemText: { fontSize: 15, color: '#111827' },
-
   textarea: { minHeight: 80, textAlignVertical: 'top' },
   charCount: { fontSize: 11, color: '#9ca3af', marginTop: 4, textAlign: 'right' },
-
   sectionTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 12 },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
   switchLabel: { fontSize: 14, color: '#374151', flex: 1, paddingRight: 12 },
   divider: { height: 1, backgroundColor: '#e5e7eb', marginVertical: 20 },
-
   checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   checkbox: { width: 22, height: 22, borderRadius: 4, borderWidth: 2, borderColor: '#d1d5db', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   checkboxChecked: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
@@ -675,7 +429,6 @@ const styles = StyleSheet.create({
   checkmark: { color: '#fff', fontSize: 13, fontWeight: '700' },
   checkLabel: { flex: 1, fontSize: 14, color: '#374151', lineHeight: 20 },
   link: { color: '#2563eb' },
-
   navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, marginBottom: 8 },
   btnPrimary: { backgroundColor: '#2563eb', paddingHorizontal: 24, paddingVertical: 13, borderRadius: 10 },
   btnSuccess: { backgroundColor: '#16a34a' },
@@ -683,7 +436,6 @@ const styles = StyleSheet.create({
   btnPrimaryText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   btnOutline: { borderWidth: 1.5, borderColor: '#d1d5db', paddingHorizontal: 20, paddingVertical: 13, borderRadius: 10 },
   btnOutlineText: { color: '#374151', fontSize: 15, fontWeight: '600' },
-
   footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 24 },
   footerText: { fontSize: 14, color: '#6b7280' },
   footerLink: { fontSize: 14, color: '#2563eb', fontWeight: '600' },
