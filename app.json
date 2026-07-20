@@ -36,10 +36,6 @@
       "expo-build-properties",
       "expo-secure-store"
     ],
-    "extra": {
-      "eas": {
-        "projectId": "94f41858-ec4e-41d8-87b8-9ad604de4288"
-      }
-    }
+    "owner": "unnyanr11"
   }
 }
