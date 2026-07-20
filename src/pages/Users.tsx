@@ -1,5 +1,7 @@
 /**
  * Users.tsx — Browse marketplace users
+ * Navigates to UserProfile (public view) not Profile (own edit)
+ * DB: user_profiles (lowercase, matching web)
  */
 import React, { useEffect, useState } from 'react';
 import {
@@ -27,7 +29,8 @@ export default function Users({ navigation }: Props) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.from('UserProfile').select('user_id, display_name, company_name, region, bio')
+    supabase.from('user_profiles')
+      .select('user_id, display_name, company_name, region, bio')
       .order('display_name')
       .then(({ data }) => {
         setUsers((data as UserRow[]) ?? []);
@@ -69,7 +72,7 @@ export default function Users({ navigation }: Props) {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={s.card}
-            onPress={() => navigation.navigate('Profile', { userId: item.user_id })}
+            onPress={() => navigation.navigate('UserProfile', { userId: item.user_id })}
           >
             <View style={s.avatar}>
               <Text style={s.avatarText}>{item.display_name?.[0]?.toUpperCase()}</Text>

@@ -10,24 +10,31 @@ import { ActivityIndicator, View } from 'react-native';
 import { supabase } from './src/supabase/client';
 import type { Session } from '@supabase/supabase-js';
 
-// Auth screens
+// Auth
 import LoginPage from './src/pages/Login';
 import RegisterPage from './src/pages/Register';
 
-// App screens
+// Core
 import DashboardPage from './src/pages/Dashboard';
 import DemandsPage from './src/pages/Demands';
 import DemandDetailPage from './src/pages/DemandDetail';
 import CreateDemandPage from './src/pages/CreateDemand';
 import MyBidsPage from './src/pages/MyBids';
 import ProfilePage from './src/pages/Profile';
+import UserProfilePage from './src/pages/UserProfile';
 import NotificationsPage from './src/pages/Notifications';
+
+// Messaging
 import MessagesPage from './src/pages/Messages';
 import MessageThreadPage from './src/pages/MessageThread';
+
+// Commerce / User
 import OrdersPage from './src/pages/Orders';
 import SettingsPage from './src/pages/Settings';
 import UsersPage from './src/pages/Users';
 import WatchlistPage from './src/pages/Watchlist';
+
+// Alliance
 import AllianceHubPage from './src/pages/AllianceHub';
 import AllianceCreatePage from './src/pages/AllianceCreate';
 import AllianceDashboardPage from './src/pages/AllianceDashboard';
@@ -44,10 +51,11 @@ export type RootStackParamList = {
   DemandDetail: { demandId: string };
   CreateDemand: undefined;
   MyBids: undefined;
-  Profile: { userId?: string } | undefined;
+  Profile: undefined;                         // own profile
+  UserProfile: { userId: string };            // another user's public profile
   Notifications: undefined;
   // Messaging
-  Messages: undefined;
+  Messages: { recipientId?: string } | undefined;
   MessageThread: { threadId: string; otherUserName: string };
   // Commerce
   Orders: undefined;
@@ -67,9 +75,8 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const queryClient = new QueryClient();
 
 /**
- * All screens are ALWAYS registered — no conditional wrapping.
- * React Navigation requires every screen to be mounted unconditionally inside
- * Stack.Navigator. The session prop only controls initialRouteName.
+ * All screens always registered flat — no conditional fragments.
+ * initialRouteName controls start screen; onAuthStateChange handles redirects.
  */
 function AppNavigator({ session }: { session: Session | null }) {
   return (
@@ -77,30 +84,31 @@ function AppNavigator({ session }: { session: Session | null }) {
       initialRouteName={session ? 'Dashboard' : 'Login'}
       screenOptions={{ headerShown: false }}
     >
-      {/* ── Auth ─────────────────────────────────────────────── */}
+      {/* Auth */}
       <Stack.Screen name="Login" component={LoginPage} />
       <Stack.Screen name="Register" component={RegisterPage} />
 
-      {/* ── Core ─────────────────────────────────────────────── */}
+      {/* Core */}
       <Stack.Screen name="Dashboard" component={DashboardPage} />
       <Stack.Screen name="Demands" component={DemandsPage} />
       <Stack.Screen name="DemandDetail" component={DemandDetailPage} />
       <Stack.Screen name="CreateDemand" component={CreateDemandPage} />
       <Stack.Screen name="MyBids" component={MyBidsPage} />
       <Stack.Screen name="Profile" component={ProfilePage} />
+      <Stack.Screen name="UserProfile" component={UserProfilePage} />
       <Stack.Screen name="Notifications" component={NotificationsPage} />
 
-      {/* ── Messaging ────────────────────────────────────────── */}
+      {/* Messaging */}
       <Stack.Screen name="Messages" component={MessagesPage} />
       <Stack.Screen name="MessageThread" component={MessageThreadPage} />
 
-      {/* ── Commerce / User ──────────────────────────────────── */}
+      {/* Commerce / User */}
       <Stack.Screen name="Orders" component={OrdersPage} />
       <Stack.Screen name="Settings" component={SettingsPage} />
       <Stack.Screen name="Users" component={UsersPage} />
       <Stack.Screen name="Watchlist" component={WatchlistPage} />
 
-      {/* ── Alliance ─────────────────────────────────────────── */}
+      {/* Alliance */}
       <Stack.Screen name="AllianceHub" component={AllianceHubPage} />
       <Stack.Screen name="AllianceCreate" component={AllianceCreatePage} />
       <Stack.Screen name="AllianceDashboard" component={AllianceDashboardPage} />
@@ -119,11 +127,9 @@ export default function App() {
       setSession(session);
       setLoading(false);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 

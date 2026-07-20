@@ -1,222 +1,185 @@
-import { useEffect, useState } from 'react';
+/**
+ * Dashboard — matches MarketSim-Pro web:
+ *  - Stat cards: Active demands, My bids, Unread messages, My alliances
+ *  - Quick action cards: Browse demands, Create demand, Track bids, Alliances
+ *  - DB table names match web: demands, bids, messages, alliance_members
+ */
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TouchableOpacity,
-  StyleSheet,
-  RefreshControl,
-  ActivityIndicator,
+  ActivityIndicator, RefreshControl, ScrollView,
+  StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../../App';
-import { ordersService, type OrderData } from '../services/order.service';
 import { supabase } from '../supabase/client';
+import type { RootStackParamList } from '../../App';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Dashboard'>;
 
+interface Stats {
+  myActiveDemands: number;
+  myBids: number;
+  unreadMessages: number;
+  myAlliances: number;
+}
+
+const ICON: Record<string, string> = {
+  demands: '\uD83D\uDED2',
+  bids: '\uD83D\uDD28',
+  messages: '\uD83D\uDCAC',
+  alliances: '\uD83D\uDEE1\uFE0F',
+};
+
+const COLORS: Record<string, string> = {
+  demands: '#1d4ed8',
+  bids: '#d97706',
+  messages: '#7c3aed',
+  alliances: '#059669',
+};
+
 export default function DashboardPage() {
   const navigation = useNavigation<NavProp>();
-  const [orders, setOrders] = useState<OrderData[]>([]);
+  const [stats, setStats] = useState<Stats>({ myActiveDemands: 0, myBids: 0, unreadMessages: 0, myAlliances: 0 });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState('');
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setUserId(user.id);
-    });
-  }, []);
-
-  const fetchOrders = async () => {
+  const fetchStats = async () => {
     try {
-      const { orders } = await ordersService.getOrders(
-        {},
-        { field: 'createdAt', direction: 'desc' },
-        20
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      setDisplayName(
+        user.user_metadata?.display_name ||
+        user.email?.split('@')[0] ||
+        ''
       );
-      setOrders(orders);
-    } catch (e) {
-      console.error('Failed to fetch orders:', e);
+
+      const [demandsRes, bidsRes, msgsRes, alliancesRes] = await Promise.all([
+        supabase.from('demands').select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id).eq('status', 'open'),
+        supabase.from('bids').select('id', { count: 'exact', head: true })
+          .eq('bidder_id', user.id),
+        supabase.from('messages').select('id', { count: 'exact', head: true })
+          .eq('recipient_id', user.id).eq('is_read', false),
+        supabase.from('alliance_members').select('alliance_id', { count: 'exact', head: true })
+          .eq('user_id', user.id).eq('status', 'active'),
+      ]);
+
+      setStats({
+        myActiveDemands: demandsRes.count ?? 0,
+        myBids: bidsRes.count ?? 0,
+        unreadMessages: msgsRes.count ?? 0,
+        myAlliances: alliancesRes.count ?? 0,
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
+  useEffect(() => { fetchStats(); }, []);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchOrders();
-  };
+  const onRefresh = () => { setRefreshing(true); fetchStats(); };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-  };
+  const handleLogout = async () => { await supabase.auth.signOut(); };
 
   if (loading) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#6366f1" />
-      </View>
-    );
+    return <View style={s.center}><ActivityIndicator size="large" color="#6366f1" /></View>;
   }
 
+  const statCards = [
+    { key: 'demands', label: 'Active demands', value: stats.myActiveDemands, onPress: () => navigation.navigate('Demands') },
+    { key: 'bids', label: 'My bids', value: stats.myBids, onPress: () => navigation.navigate('MyBids') },
+    { key: 'messages', label: 'Unread messages', value: stats.unreadMessages, onPress: () => navigation.navigate('Messages') },
+    { key: 'alliances', label: 'My alliances', value: stats.myAlliances, onPress: () => navigation.navigate('AllianceHub') },
+  ];
+
+  const quickActions = [
+    { icon: '\uD83D\uDCCB', title: 'Browse demands', desc: 'Find opportunities that match your products.', onPress: () => navigation.navigate('Demands') },
+    { icon: '\u2795', title: 'Create a demand', desc: 'Post your buy/sell request to the market.', onPress: () => navigation.navigate('CreateDemand') },
+    { icon: '\uD83D\uDCC8', title: 'Track my bids', desc: 'See the status of all your placed bids.', onPress: () => navigation.navigate('MyBids') },
+    { icon: '\uD83D\uDEE1\uFE0F', title: 'Alliances', desc: 'Join or manage trading alliances with others.', onPress: () => navigation.navigate('AllianceHub') },
+  ];
+
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={s.container}
+      contentContainerStyle={s.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />}
+    >
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>MarketSim Pro</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={styles.headerBtn}
-            onPress={() => navigation.navigate('Notifications')}
-          >
-            <Text style={styles.headerBtnText}>🔔</Text>
+      <View style={s.header}>
+        <View style={s.headerLeft}>
+          <Text style={s.headerTitle}>
+            Welcome{displayName ? `, ${displayName}` : ''} \uD83D\uDC4B
+          </Text>
+          <Text style={s.headerSub}>Your trading overview and quick actions</Text>
+        </View>
+        <View style={s.headerActions}>
+          <TouchableOpacity style={s.iconBtn} onPress={() => navigation.navigate('Notifications')}>
+            <Text style={s.iconBtnText}>\uD83D\uDD14</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.headerBtn}
-            onPress={() => navigation.navigate('Profile')}
-          >
-            <Text style={styles.headerBtnText}>👤</Text>
+          <TouchableOpacity style={s.iconBtn} onPress={() => navigation.navigate('Profile')}>
+            <Text style={s.iconBtnText}>\uD83D\uDC64</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn} onPress={handleLogout}>
-            <Text style={styles.headerBtnText}>↩</Text>
+          <TouchableOpacity style={s.iconBtn} onPress={handleLogout}>
+            <Text style={s.iconBtnText}>\u21A9</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Quick Actions */}
-      <View style={styles.quickActions}>
-        <TouchableOpacity
-          style={[styles.quickBtn, { backgroundColor: '#6366f1' }]}
-          onPress={() => navigation.navigate('CreateDemand')}
-        >
-          <Text style={styles.quickBtnText}>+ Post Demand</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.quickBtn, { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#6366f1' }]}
-          onPress={() => navigation.navigate('MyBids')}
-        >
-          <Text style={styles.quickBtnText}>My Bids</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Tab Filters */}
-      <View style={styles.filters}>
-        <TouchableOpacity
-          style={styles.filterChip}
-          onPress={() => navigation.navigate('Demands', { filter: 'buy' })}
-        >
-          <Text style={styles.filterChipText}>Buy Demands</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.filterChip}
-          onPress={() => navigation.navigate('Demands', { filter: 'sell' })}
-        >
-          <Text style={styles.filterChipText}>Sell Demands</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.filterChip}
-          onPress={() => navigation.navigate('Demands')}
-        >
-          <Text style={styles.filterChipText}>All</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Orders Feed */}
-      <FlatList
-        data={orders}
-        keyExtractor={(item) => item.demandId}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#6366f1"
-          />
-        }
-        contentContainerStyle={orders.length === 0 ? styles.emptyContainer : { paddingBottom: 24 }}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>No demands yet. Be the first to post!</Text>
-        }
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.card}
-            onPress={() => navigation.navigate('DemandDetail', { demandId: item.demandId })}
-          >
-            <View style={styles.cardRow}>
-              <View style={[styles.typeBadge, { backgroundColor: item.type === 'buy' ? '#1d4ed8' : '#065f46' }]}>
-                <Text style={styles.typeBadgeText}>{item.type.toUpperCase()}</Text>
-              </View>
-              {item.isUrgent && (
-                <View style={styles.urgentBadge}>
-                  <Text style={styles.urgentText}>URGENT</Text>
-                </View>
-              )}
+      {/* Stat cards */}
+      <Text style={s.sectionLabel}>YOUR ACTIVITY</Text>
+      <View style={s.grid}>
+        {statCards.map(c => (
+          <TouchableOpacity key={c.key} style={s.statCard} onPress={c.onPress}>
+            <View style={[s.statIconWrap, { backgroundColor: COLORS[c.key] + '22' }]}>
+              <Text style={s.statIcon}>{ICON[c.key]}</Text>
             </View>
-            <Text style={styles.productName}>{item.productName}</Text>
-            {item.userCompanyName ? (
-              <Text style={styles.companyName}>{item.userCompanyName}</Text>
-            ) : null}
-            <View style={styles.cardFooter}>
-              <Text style={styles.metaText}>Qty: {item.quantity}</Text>
-              {item.discountPercentage != null && (
-                <Text style={styles.metaText}>{item.discountPercentage}% off</Text>
-              )}
-              <Text style={styles.metaText}>
-                {'⭐'.repeat(Math.min(item.qualityStars || 0, 5))}
-              </Text>
-            </View>
+            <Text style={s.statValue}>{c.value}</Text>
+            <Text style={s.statLabel}>{c.label}</Text>
           </TouchableOpacity>
-        )}
-      />
-    </View>
+        ))}
+      </View>
+
+      {/* Quick actions */}
+      <Text style={s.sectionLabel}>QUICK ACTIONS</Text>
+      <View style={s.grid}>
+        {quickActions.map(a => (
+          <TouchableOpacity key={a.title} style={s.actionCard} onPress={a.onPress}>
+            <Text style={s.actionIcon}>{a.icon}</Text>
+            <Text style={s.actionTitle}>{a.title}</Text>
+            <Text style={s.actionDesc}>{a.desc}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <View style={{ height: 32 }} />
+    </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f172a' },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a' },
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12, backgroundColor: '#1e293b',
-  },
+  content: { paddingBottom: 32 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0f172a' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: 56, paddingHorizontal: 16, paddingBottom: 16, backgroundColor: '#1e293b', borderBottomWidth: 1, borderBottomColor: '#334155' },
+  headerLeft: { flex: 1, paddingRight: 8 },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#f1f5f9' },
-  headerActions: { flexDirection: 'row', gap: 8 },
-  headerBtn: { padding: 8 },
-  headerBtnText: { fontSize: 20 },
-  quickActions: {
-    flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 12,
-  },
-  quickBtn: {
-    flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center',
-  },
-  quickBtnText: { color: '#f1f5f9', fontWeight: '600', fontSize: 14 },
-  filters: {
-    flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 12,
-  },
-  filterChip: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
-    backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155',
-  },
-  filterChipText: { color: '#94a3b8', fontSize: 12, fontWeight: '500' },
-  card: {
-    backgroundColor: '#1e293b', marginHorizontal: 16, marginBottom: 10,
-    borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#334155',
-  },
-  cardRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
-  typeBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  typeBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  urgentBadge: { backgroundColor: '#7f1d1d', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  urgentText: { color: '#fca5a5', fontSize: 10, fontWeight: '700' },
-  productName: { fontSize: 16, fontWeight: '600', color: '#f1f5f9', marginBottom: 2 },
-  companyName: { fontSize: 12, color: '#6366f1', marginBottom: 6 },
-  cardFooter: { flexDirection: 'row', gap: 12, marginTop: 6 },
-  metaText: { fontSize: 12, color: '#64748b' },
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 80 },
-  emptyText: { color: '#475569', fontSize: 15, textAlign: 'center' },
+  headerSub: { fontSize: 12, color: '#64748b', marginTop: 2 },
+  headerActions: { flexDirection: 'row', gap: 4 },
+  iconBtn: { padding: 8 },
+  iconBtnText: { fontSize: 20 },
+  sectionLabel: { fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 1, paddingHorizontal: 16, marginTop: 20, marginBottom: 10 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 8 },
+  statCard: { width: '47%', backgroundColor: '#1e293b', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#334155' },
+  statIconWrap: { width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
+  statIcon: { fontSize: 20 },
+  statValue: { fontSize: 26, fontWeight: '800', color: '#f1f5f9', marginBottom: 2 },
+  statLabel: { fontSize: 12, color: '#64748b' },
+  actionCard: { width: '47%', backgroundColor: '#1e293b', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#334155' },
+  actionIcon: { fontSize: 24, marginBottom: 8 },
+  actionTitle: { fontSize: 14, fontWeight: '700', color: '#f1f5f9', marginBottom: 4 },
+  actionDesc: { fontSize: 12, color: '#64748b', lineHeight: 16 },
 });

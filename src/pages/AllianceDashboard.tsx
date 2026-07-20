@@ -1,9 +1,11 @@
 /**
- * AllianceDashboard.tsx — Alliance overview: info, members, actions
+ * AllianceDashboard.tsx — Alliance overview
+ * Member tap navigates to UserProfile (public view), matching web
+ * DB tables: alliances, alliance_members (lowercase, matching web)
  */
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, FlatList, ScrollView,
+  ActivityIndicator, Alert, ScrollView,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -12,20 +14,10 @@ import type { RootStackParamList } from '../../App';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AllianceDashboard'>;
 
-interface Member {
-  user_id: string;
-  display_name: string;
-  role: string;
-}
-
+interface Member { user_id: string; display_name: string; role: string; }
 interface AllianceData {
-  id: string;
-  name: string;
-  description: string;
-  region: string;
-  is_public: boolean;
-  member_count: number;
-  owner_id: string;
+  id: string; name: string; description: string;
+  region: string; is_public: boolean; member_count: number; owner_id: string;
 }
 
 export default function AllianceDashboard({ route, navigation }: Props) {
@@ -40,12 +32,18 @@ export default function AllianceDashboard({ route, navigation }: Props) {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) setCurrentUserId(user.id);
-      const [{ data: a }, { data: m }] = await Promise.all([
-        supabase.from('Alliances').select('*').eq('id', allianceId).single(),
-        supabase.from('AllianceMembers').select('user_id, role, UserProfile:user_id(display_name)').eq('alliance_id', allianceId),
+      const [{ data: a }, { data: mRaw }] = await Promise.all([
+        supabase.from('alliances').select('*').eq('id', allianceId).single(),
+        supabase.from('alliance_members')
+          .select('user_id, role, user_profiles!user_id(display_name)')
+          .eq('alliance_id', allianceId),
       ]);
       setAlliance(a as AllianceData);
-      const memberList = (m as any[])?.map(x => ({ user_id: x.user_id, display_name: x.UserProfile?.display_name ?? 'Unknown', role: x.role })) ?? [];
+      const memberList: Member[] = (mRaw as any[])?.map(x => ({
+        user_id: x.user_id,
+        display_name: x.user_profiles?.display_name ?? 'Unknown',
+        role: x.role,
+      })) ?? [];
       setMembers(memberList);
       if (user) setIsMember(memberList.some(m => m.user_id === user.id));
       setLoading(false);
@@ -53,9 +51,11 @@ export default function AllianceDashboard({ route, navigation }: Props) {
   }, [allianceId]);
 
   const joinAlliance = async () => {
-    const { error } = await supabase.from('AllianceMembers').insert({ alliance_id: allianceId, user_id: currentUserId, role: 'member' });
+    const { error } = await supabase.from('alliance_members').insert(
+      { alliance_id: allianceId, user_id: currentUserId, role: 'member', status: 'active' }
+    );
     if (error) { Alert.alert('Error', error.message); return; }
-    await supabase.from('Alliances').update({ member_count: (alliance?.member_count ?? 0) + 1 }).eq('id', allianceId);
+    await supabase.from('alliances').update({ member_count: (alliance?.member_count ?? 0) + 1 }).eq('id', allianceId);
     setIsMember(true);
   };
 
@@ -63,7 +63,8 @@ export default function AllianceDashboard({ route, navigation }: Props) {
     Alert.alert('Leave Alliance', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Leave', style: 'destructive', onPress: async () => {
-        await supabase.from('AllianceMembers').delete().eq('alliance_id', allianceId).eq('user_id', currentUserId);
+        await supabase.from('alliance_members').delete()
+          .eq('alliance_id', allianceId).eq('user_id', currentUserId);
         setIsMember(false);
         navigation.goBack();
       }},
@@ -83,7 +84,8 @@ export default function AllianceDashboard({ route, navigation }: Props) {
         </TouchableOpacity>
         <Text style={s.headerTitle} numberOfLines={1}>{alliance.name}</Text>
         {isOwner && (
-          <TouchableOpacity style={s.settingsBtn} onPress={() => navigation.navigate('AllianceSettings', { allianceId })}>
+          <TouchableOpacity style={s.settingsBtn}
+            onPress={() => navigation.navigate('AllianceSettings', { allianceId })}>
             <Text style={s.settingsText}>⚙️</Text>
           </TouchableOpacity>
         )}
@@ -101,7 +103,8 @@ export default function AllianceDashboard({ route, navigation }: Props) {
       <View style={s.actionsRow}>
         {isMember ? (
           <>
-            <TouchableOpacity style={s.btnPrimary} onPress={() => navigation.navigate('AllianceChat', { allianceId, allianceName: alliance.name })}>
+            <TouchableOpacity style={s.btnPrimary}
+              onPress={() => navigation.navigate('AllianceChat', { allianceId, allianceName: alliance.name })}>
               <Text style={s.btnText}>💬 Chat</Text>
             </TouchableOpacity>
             {!isOwner && (
@@ -118,11 +121,25 @@ export default function AllianceDashboard({ route, navigation }: Props) {
       </View>
 
       <Text style={s.sectionTitle}>Members ({members.length})</Text>
-      {members.map(m => (
-        <TouchableOpacity key={m.user_id} style={s.memberRow} onPress={() => navigation.navigate('Profile', { userId: m.user_id })}>
-          <View style={s.avatar}><Text style={s.avatarText}>{m.display_name[0]?.toUpperCase()}</Text></View>
-          <Text style={s.memberName}>{m.display_name}</Text>
-          {m.role === 'owner' && <View style={s.ownerBadge}><Text style={s.ownerText}>Owner</Text></View>}
+      {members.map(member => (
+        <TouchableOpacity
+          key={member.user_id}
+          style={s.memberRow}
+          onPress={() => {
+            if (member.user_id === currentUserId) {
+              navigation.navigate('Profile');
+            } else {
+              navigation.navigate('UserProfile', { userId: member.user_id });
+            }
+          }}
+        >
+          <View style={s.avatar}>
+            <Text style={s.avatarText}>{member.display_name[0]?.toUpperCase()}</Text>
+          </View>
+          <Text style={s.memberName}>{member.display_name}</Text>
+          {member.role === 'owner' && (
+            <View style={s.ownerBadge}><Text style={s.ownerText}>Owner</Text></View>
+          )}
         </TouchableOpacity>
       ))}
       <View style={{ height: 32 }} />
