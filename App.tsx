@@ -46,10 +46,12 @@ export type RootStackParamList = {
   MyBids: undefined;
   Profile: { userId?: string } | undefined;
   Notifications: undefined;
-  // New pages
+  // Messaging
   Messages: undefined;
   MessageThread: { threadId: string; otherUserName: string };
+  // Commerce
   Orders: undefined;
+  // User
   Settings: undefined;
   Users: undefined;
   Watchlist: undefined;
@@ -64,39 +66,46 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const queryClient = new QueryClient();
 
+/**
+ * All screens are ALWAYS registered — no conditional wrapping.
+ * React Navigation requires every screen to be mounted unconditionally inside
+ * Stack.Navigator. The session prop only controls initialRouteName.
+ */
 function AppNavigator({ session }: { session: Session | null }) {
   return (
     <Stack.Navigator
       initialRouteName={session ? 'Dashboard' : 'Login'}
       screenOptions={{ headerShown: false }}
     >
-      {session ? (
-        <>
-          <Stack.Screen name="Dashboard" component={DashboardPage} />
-          <Stack.Screen name="Demands" component={DemandsPage} />
-          <Stack.Screen name="DemandDetail" component={DemandDetailPage} />
-          <Stack.Screen name="CreateDemand" component={CreateDemandPage} />
-          <Stack.Screen name="MyBids" component={MyBidsPage} />
-          <Stack.Screen name="Profile" component={ProfilePage} />
-          <Stack.Screen name="Notifications" component={NotificationsPage} />
-          <Stack.Screen name="Messages" component={MessagesPage} />
-          <Stack.Screen name="MessageThread" component={MessageThreadPage} />
-          <Stack.Screen name="Orders" component={OrdersPage} />
-          <Stack.Screen name="Settings" component={SettingsPage} />
-          <Stack.Screen name="Users" component={UsersPage} />
-          <Stack.Screen name="Watchlist" component={WatchlistPage} />
-          <Stack.Screen name="AllianceHub" component={AllianceHubPage} />
-          <Stack.Screen name="AllianceCreate" component={AllianceCreatePage} />
-          <Stack.Screen name="AllianceDashboard" component={AllianceDashboardPage} />
-          <Stack.Screen name="AllianceChat" component={AllianceChatPage} />
-          <Stack.Screen name="AllianceSettings" component={AllianceSettingsPage} />
-        </>
-      ) : (
-        <>
-          <Stack.Screen name="Login" component={LoginPage} />
-          <Stack.Screen name="Register" component={RegisterPage} />
-        </>
-      )}
+      {/* ── Auth ─────────────────────────────────────────────── */}
+      <Stack.Screen name="Login" component={LoginPage} />
+      <Stack.Screen name="Register" component={RegisterPage} />
+
+      {/* ── Core ─────────────────────────────────────────────── */}
+      <Stack.Screen name="Dashboard" component={DashboardPage} />
+      <Stack.Screen name="Demands" component={DemandsPage} />
+      <Stack.Screen name="DemandDetail" component={DemandDetailPage} />
+      <Stack.Screen name="CreateDemand" component={CreateDemandPage} />
+      <Stack.Screen name="MyBids" component={MyBidsPage} />
+      <Stack.Screen name="Profile" component={ProfilePage} />
+      <Stack.Screen name="Notifications" component={NotificationsPage} />
+
+      {/* ── Messaging ────────────────────────────────────────── */}
+      <Stack.Screen name="Messages" component={MessagesPage} />
+      <Stack.Screen name="MessageThread" component={MessageThreadPage} />
+
+      {/* ── Commerce / User ──────────────────────────────────── */}
+      <Stack.Screen name="Orders" component={OrdersPage} />
+      <Stack.Screen name="Settings" component={SettingsPage} />
+      <Stack.Screen name="Users" component={UsersPage} />
+      <Stack.Screen name="Watchlist" component={WatchlistPage} />
+
+      {/* ── Alliance ─────────────────────────────────────────── */}
+      <Stack.Screen name="AllianceHub" component={AllianceHubPage} />
+      <Stack.Screen name="AllianceCreate" component={AllianceCreatePage} />
+      <Stack.Screen name="AllianceDashboard" component={AllianceDashboardPage} />
+      <Stack.Screen name="AllianceChat" component={AllianceChatPage} />
+      <Stack.Screen name="AllianceSettings" component={AllianceSettingsPage} />
     </Stack.Navigator>
   );
 }
